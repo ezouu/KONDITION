@@ -1,9 +1,35 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, AuthState } from './types';
+import { auth } from '../services/firebaseConfig'; // Adjust path to your firebase config
+import {
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  FacebookAuthProvider,
+  signInWithPopup, // For web-based Facebook login
+} from 'firebase/auth';
 
+// No signup implemented currently:
+// only user is littletest@ucsc.edu (added manually to firebase)
+// password: 12356
+
+// Types (simplify or import from your own 'types.ts')
+interface User {
+  id: string;
+  name: string;
+  email?: string;
+}
+interface AuthState {
+  user: User | null;
+  isLoading: boolean;
+  error: string | null;
+}
+interface LoginCredentials {
+  email: string;
+  password: string;
+}
 interface AuthContextType {
   authState: AuthState;
-  login: (credentials: { email: string; password: string }) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   facebookLogin: () => Promise<void>;
 }
@@ -17,64 +43,92 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     error: null,
   });
 
-  const login = async (credentials: { email: string; password: string }) => {
+  // Keep user in sync with Firebase
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        setAuthState({
+          user: {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName ?? 'Firebase User',
+            email: firebaseUser.email ?? undefined,
+          },
+          isLoading: false,
+          error: null,
+        });
+      } else {
+        setAuthState((prev) => ({
+          ...prev,
+          user: null,
+          isLoading: false,
+        }));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Email/Password login
+  const login = async ({ email, password }: LoginCredentials) => {
     try {
-      setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-      // Simulate successful login by creating a mock user
+      setAuthState((prev) => ({ ...prev, isLoading: true, error: null }));
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const fbUser = userCredential.user;
+
       setAuthState({
         user: {
-          id: '1',
-          name: 'Test User',
-          email: credentials.email,
+          id: fbUser.uid,
+          name: fbUser.displayName ?? 'No Name',
+          email: fbUser.email ?? undefined,
         },
         isLoading: false,
         error: null,
       });
-    } catch (error) {
-      setAuthState(prev => ({
+    } catch (error: any) {
+      setAuthState((prev) => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'An error occurred',
+        error: error?.message || 'Error logging in',
       }));
     }
   };
 
+  // Logout
   const logout = async () => {
     try {
-      setAuthState(prev => ({ ...prev, isLoading: true }));
-      // Implement your logout logic here
-      setAuthState({
-        user: null,
-        isLoading: false,
-        error: null,
-      });
-    } catch (error) {
-      setAuthState(prev => ({
+      setAuthState((prev) => ({ ...prev, isLoading: true, error: null }));
+      await signOut(auth);
+      setAuthState({ user: null, isLoading: false, error: null });
+    } catch (error: any) {
+      setAuthState((prev) => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'An error occurred',
+        error: error?.message || 'Error logging out',
       }));
     }
   };
 
+  // Facebook login (web popup example)
   const facebookLogin = async () => {
     try {
-      setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-      // Simulate successful Facebook login
+      setAuthState((prev) => ({ ...prev, isLoading: true, error: null }));
+      const provider = new FacebookAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const fbUser = result.user;
+
       setAuthState({
         user: {
-          id: '2',
-          name: 'Facebook User',
-          email: 'facebook@example.com',
+          id: fbUser.uid,
+          name: fbUser.displayName ?? 'Facebook User',
+          email: fbUser.email ?? undefined,
         },
         isLoading: false,
         error: null,
       });
-    } catch (error) {
-      setAuthState(prev => ({
+    } catch (error: any) {
+      setAuthState((prev) => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'An error occurred',
+        error: error?.message || 'Error with Facebook login',
       }));
     }
   };
@@ -88,8 +142,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}; 
+};
